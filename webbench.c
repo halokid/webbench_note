@@ -15,7 +15,11 @@
  *    3 - internal error, fork failed
  * 
  */ 
+
+// 非系统内置
 #include "socket.c"
+
+// 系统内置头文件
 #include <unistd.h>
 #include <sys/param.h>
 #include <rpc/types.h>
