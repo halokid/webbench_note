@@ -29,7 +29,7 @@
 #include <signal.h>
 
 /* values */
-volatile int timerexpired=0;
+volatile int timerexpired=0;      // 声明编译器每次都要去重新读取 timerexpired， 不为此变量添加任何优化代码
 int speed=0;
 int failed=0;
 int bytes=0;
@@ -50,11 +50,12 @@ char *proxyhost=NULL;
 int benchtime=30;
 /* internal */
 int mypipe[2];
-char host[MAXHOSTNAMELEN];
-#define REQUEST_SIZE 2048
-char request[REQUEST_SIZE];
+char host[MAXHOSTNAMELEN];      //host 数组
 
-static const struct option long_options[]=
+#define REQUEST_SIZE 2048
+char request[REQUEST_SIZE];     // request 数组
+
+static const struct option long_options[]=      //静态结构体, 设定 option 结构体里面的  long_options 数组, 设定参数的属性
 {
  {"force",no_argument,&force,1},
  {"reload",no_argument,&force_reload,1},
@@ -83,6 +84,7 @@ static void alarm_handler(int signal)
    timerexpired=1;
 }	
 
+//输出命令行的 help 封装成函数
 static void usage(void)
 {
    fprintf(stderr,
@@ -103,6 +105,8 @@ static void usage(void)
 	"  -V|--version             Display program version.\n"
 	);
 };
+
+//主函数
 int main(int argc, char *argv[])
 {
  int opt=0;
@@ -112,11 +116,12 @@ int main(int argc, char *argv[])
  if(argc==1)
  {
 	  usage();
-          return 2;
+    return 2;
  } 
 
+ // 这个 while 的逻辑是为 获取参数
  while((opt=getopt_long(argc,argv,"912Vfrt:p:c:?h",long_options,&options_index))!=EOF )
- {
+ {  
   switch(opt)
   {
    case  0 : break;
@@ -126,12 +131,12 @@ int main(int argc, char *argv[])
    case '1': http10=1;break;
    case '2': http10=2;break;
    case 'V': printf(PROGRAM_VERSION"\n");exit(0);
-   case 't': benchtime=atoi(optarg);break;	     
-   case 'p': 
+   case 't': benchtime=atoi(optarg);break;	   // optarg 为 getopt.h 组件内置    
+   case 'p':    //代理设置
 	     /* proxy server parsing server:port */
 	     tmp=strrchr(optarg,':');
-	     proxyhost=optarg;
-	     if(tmp==NULL)
+	     proxyhost=optarg;     //取得代理服务器
+	     if(tmp==NULL)         // 如果不符合代理的设置格式，退出程序
 	     {
 		     break;
 	     }
@@ -152,13 +157,13 @@ int main(int argc, char *argv[])
    case '?': usage();return 2;break;
    case 'c': clients=atoi(optarg);break;
   }
- }
+}    // END WHILE
  
  if(optind==argc) {
-                      fprintf(stderr,"webbench: Missing URL!\n");
-		      usage();
-		      return 2;
-                    }
+   fprintf(stderr,"webbench: Missing URL!\n");
+	 usage();
+	 return 2;
+ }
 
  if(clients==0) clients=1;
  if(benchtime==0) benchtime=60;
@@ -166,7 +171,15 @@ int main(int argc, char *argv[])
  fprintf(stderr,"Webbench - Simple Web Benchmark "PROGRAM_VERSION"\n"
 	 "Copyright (c) Radim Kolar 1997-2004, GPL Open Source Software.\n"
 	 );
+
+/**
+上面一大段逻辑都是为了 获取参数 和 输出信息的， 下面才开始真正的主功能逻辑
+**/   
+   
+// 执行完  build_request 之后， request就组成好了, request 就是HTTP头信息
  build_request(argv[optind]);
+ 
+ 
  /* print bench info */
  printf("\nBenchmarking: ");
  switch(method)
@@ -182,12 +195,15 @@ int main(int argc, char *argv[])
 		 printf("TRACE");break;
  }
  printf(" %s",argv[optind]);
+ 
  switch(http10)
  {
 	 case 0: printf(" (using HTTP/0.9)");break;
 	 case 2: printf(" (using HTTP/1.1)");break;
  }
  printf("\n");
+ 
+ 
  if(clients==1) printf("1 client");
  else
    printf("%d clients",clients);
@@ -197,14 +213,20 @@ int main(int argc, char *argv[])
  if(proxyhost!=NULL) printf(", via proxy server %s:%d",proxyhost,proxyport);
  if(force_reload) printf(", forcing reload");
  printf(".\n");
- return bench();
-}
+ /**
+  上面的逻辑都还是在根据参数， 输出到命令行的内容而已， 而还没有真正执行了 访问HTTP 的逻辑
+ **/
+ return bench();          // 真正进行HTTP 的逻辑的函数, 直接在 main 函数里面 返回回来
+}   // END MAIN FUNC
+
+
 
 void build_request(const char *url)
 {
-  char tmp[10];
+  char tmp[10];     //定义临时变量， 函数内使用
   int i;
 
+  // host, request 都是在 main 函数外已经定义好的变量
   bzero(host,MAXHOSTNAMELEN);
   bzero(request,REQUEST_SIZE);
 
@@ -213,6 +235,7 @@ void build_request(const char *url)
   if(method==METHOD_OPTIONS && http10<2) http10=2;
   if(method==METHOD_TRACE && http10<2) http10=2;
 
+  // 根据不同的 method 定义 request 的值
   switch(method)
   {
 	  default:
@@ -222,7 +245,7 @@ void build_request(const char *url)
 	  case METHOD_TRACE: strcpy(request,"TRACE");break;
   }
 		  
-  strcat(request," ");
+  strcat(request," ");      //拼接字符串
 
   if(NULL==strstr(url,"://"))
   {
@@ -270,23 +293,36 @@ void build_request(const char *url)
    // printf("ProxyHost=%s\nProxyPort=%d\n",proxyhost,proxyport);
    strcat(request,url);
   }
+  
+/**
+上次的逻辑都是一些字符串的操作， 用于获取各种参数， 判断各种参数的情况的, 获取参数赋值之后，  执行下面的逻辑
+总的来说上面的处理参数的逻辑没太大的亮点， 都是一般的逻辑处理， 可参考一下 处理字符串的方法
+**/  
+  
+/**
+ 组合 HTTP 协议内容， reques就是最后组合出来的内容
+**/  
   if(http10==1)
 	  strcat(request," HTTP/1.0");
   else if (http10==2)
 	  strcat(request," HTTP/1.1");
-  strcat(request,"\r\n");
+  strcat(request,"\r\n");         //组合 HTTP 方法和 版本
+  
   if(http10>0)
-	  strcat(request,"User-Agent: WebBench "PROGRAM_VERSION"\r\n");
+	  strcat(request,"User-Agent: WebBench "PROGRAM_VERSION"\r\n"); // 定义 agent
+    
   if(proxyhost==NULL && http10>0)
   {
 	  strcat(request,"Host: ");
 	  strcat(request,host);
 	  strcat(request,"\r\n");
   }
+  
   if(force_reload && proxyhost!=NULL)
   {
 	  strcat(request,"Pragma: no-cache\r\n");
   }
+  
   if(http10>1)
 	  strcat(request,"Connection: close\r\n");
   /* add empty line at end */
@@ -294,7 +330,24 @@ void build_request(const char *url)
   // printf("Req=%s\n",request);
 }
 
+/**
+ 上面的逻辑是 根据获取的参数 组合 HTTP 请求的头, 类似  
+ ---------------------------------------------------------
+ 
+GET /goods/list/4404 HTTP/1.1
+Host: www.xxx.com
+Connection: keep-alive
+Cache-Control: max-age=0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp
+
+ --------------------------------------------------------
+**/
+
+
 /* vraci system rc error kod */
+/**
+ 真正的执行 HTTP 的逻辑, 主功能的逻辑
+**/
 static int bench(void)
 {
   int i,j,k;	
@@ -302,13 +355,19 @@ static int bench(void)
   FILE *f;
 
   /* check avaibility of target server */
-  i=Socket(proxyhost==NULL?host:proxyhost,proxyport);
+  //检查主机的可用性
+  // Socket 在 socket.c 声明
+  i=Socket( (proxyhost==NULL) ? host : proxyhost,proxyport);
   if(i<0) { 
-	   fprintf(stderr,"\nConnect to server failed. Aborting benchmark.\n");
-           return 1;
-         }
-  close(i);
+	  fprintf(stderr,"\nConnect to server failed. Aborting benchmark.\n");
+    return 1;
+  }
+  close(i);     //检查 主机不用可，关闭socket
+  
+  
   /* create pipe */
+  // 创建管道
+  // mypipe 为长度2 的数组， 创建两个管道？？
   if(pipe(mypipe))
   {
 	  perror("pipe failed.");
@@ -324,20 +383,23 @@ static int bench(void)
   */
 
   /* fork childs */
+  // 每一个 请求 HTTP 的client 就创建一个子进程
   for(i=0;i<clients;i++)
   {
 	   pid=fork();
+    
+     // 无论子进程创建成功 还是 失败， 都 sleep 一秒 
 	   if(pid <= (pid_t) 0)
 	   {
 		   /* child process or error*/
-	           sleep(1); /* make childs faster */
+	     sleep(1); /* make childs faster */
 		   break;
 	   }
   }
 
   if( pid< (pid_t) 0)
   {
-          fprintf(stderr,"problems forking worker no. %d\n",i);
+    fprintf(stderr,"problems forking worker no. %d\n",i);
 	  perror("fork failed.");
 	  return 3;
   }
