@@ -383,7 +383,9 @@ static int bench(void)
   */
 
   /* fork childs */
+  //NOTE 这里开始循环生成子进程
   // 每一个 请求 HTTP 的client 就创建一个子进程
+  // 循环有多少个 clients ，就 fork 多少个
   for(i=0;i<clients;i++)
   {
 	   pid=fork();
@@ -392,27 +394,45 @@ static int bench(void)
 	   if(pid <= (pid_t) 0)
 	   {
 		   /* child process or error*/
+       /**
+        经典的 sleep(1) 的例子， 当执行 sleep(1) 的时候， 程序就告诉CPU 先不用进行运算，而去计算其他的，不至于因为这个 fork 逻辑而导致CPU占用太高， 也利于CPU去回收之前fork了的一些子进程（已经无用的子进程），利于系统GC， 假如不加这个，当fork逻辑多的时候，可能会造成CPU占用太高，阻塞等
+       **/
 	     sleep(1); /* make childs faster */
 		   break;
 	   }
-  }
+  }     //END FOR  
+  /**
+    上面的 for 循环不断生成子进程， 然后 pid 获取的子进程的进程号，每一次fork成功之后，都会走下面的逻辑，匹配到  pid < (pid_t) 0
+    每一个 fork 的子进程都会走这个 if 的逻辑
+    
+  **/
 
-  if( pid< (pid_t) 0)
+  if( pid< (pid_t) 0)     // 如果子进程创建失败
   {
     fprintf(stderr,"problems forking worker no. %d\n",i);
 	  perror("fork failed.");
 	  return 3;
   }
 
-  if(pid== (pid_t) 0)
+  // NOTE 上面 for循环 fork 的子进程都会匹配到这个逻辑，执行下面代码
+  if(pid== (pid_t) 0)       // 如果子进程创建成功
   {
     /* I am a child */
+    // 子进程开始执行， 这里是真正进行 socket 通信的逻辑， 真正进行 HTTP 通信的逻辑
     if(proxyhost==NULL)
-      benchcore(host,proxyport,request);
-         else
-      benchcore(proxyhost,proxyport,request);
+      benchcore(host, proxyport, request);
+    else
+      benchcore(proxyhost, proxyport, request);
+      
+   /**  
+   //NOTE
+   执行完 benchcore 之后， 改变了  bytes, speed 的值， 这两个值都是全局的
+   **/
 
-         /* write results to pipe */
+   /* write results to pipe */
+   /**
+   假如
+   **/
 	 f=fdopen(mypipe[1],"w");
 	 if(f==NULL)
 	 {
@@ -420,10 +440,11 @@ static int bench(void)
 		 return 3;
 	 }
 	 /* fprintf(stderr,"Child - %d %d\n",speed,failed); */
-	 fprintf(f,"%d %d %d\n",speed,failed,bytes);
+	 fprintf(f,"%d %d %d\n",speed,failed,bytes);     //NOTE 有多少个 子进程， 就在写入管道多少次, 信息在管理储存是队列的方式
 	 fclose(f);
 	 return 0;
-  } else
+  } 
+  else        // NOTE 上面的逻辑会一直执行 FOR 循环生成的 子进程， 跑完上面的子进程之后，开始进入到父进程
   {
 	  f=fdopen(mypipe[0],"r");
 	  if(f==NULL) 
@@ -431,19 +452,21 @@ static int bench(void)
 		  perror("open pipe for reading failed.");
 		  return 3;
 	  }
-	  setvbuf(f,NULL,_IONBF,0);
+	  setvbuf(f, NULL, _IONBF, 0);    // 把缓冲区与流相关好， _IONBF 是表示直接从流中读入数据或直接向流中写入数据，而没有缓冲区
 	  speed=0;
-          failed=0;
-          bytes=0;
+    failed=0;
+    bytes=0;
 
 	  while(1)
 	  {
-		  pid=fscanf(f,"%d %d %d",&i,&j,&k);
+		  pid=fscanf(f,"%d %d %d",&i,&j,&k);    // NOTE  循环读取管道队列的内容
 		  if(pid<2)
-                  {
-                       fprintf(stderr,"Some of our childrens died.\n");
-                       break;
-                  }
+      {
+        fprintf(stderr,"Some of our childrens died.\n");
+        break;
+      }
+      
+      // 整合内容数据
 		  speed+=i;
 		  failed+=j;
 		  bytes+=k;
@@ -452,6 +475,7 @@ static int bench(void)
 	  }
 	  fclose(f);
 
+  //输出内容数据
   printf("\nSpeed=%d pages/min, %d bytes/sec.\nRequests: %d susceed, %d failed.\n",
 		  (int)((speed+failed)/(benchtime/60.0f)),
 		  (int)(bytes/(float)benchtime),
@@ -461,24 +485,29 @@ static int bench(void)
   return i;
 }
 
-void benchcore(const char *host,const int port,const char *req)
+
+/**
+每个成功创建的子进程都会 单独执行一次这个函数
+**/
+void benchcore(const char *host, const int port, const char *req)
 {
  int rlen;
  char buf[1500];
  int s,i;
- struct sigaction sa;
+ struct sigaction sa;     //sigaction 结构体
 
  /* setup alarm signal handler */
- sa.sa_handler=alarm_handler;
+ sa.sa_handler=alarm_handler;       // 当获取 SIGALRM 信号的时候的处理函数
  sa.sa_flags=0;
- if(sigaction(SIGALRM,&sa,NULL))
+ if(sigaction(SIGALRM,&sa,NULL))      // sigaction 函数 配合 sigaction 结构体用法
     exit(3);
- alarm(benchtime);
+ alarm(benchtime);          // 延迟 benchtime  给系统发送 SIGALRM 信号
 
- rlen=strlen(req);
+ rlen=strlen(req);        //获取总的请求的长度
+ 
  nexttry:while(1)
  {
-    if(timerexpired)
+    if(timerexpired)        // 假如执行了 alarm_handler 函数之后,  timerexpired数值会为 1
     {
        if(failed>0)
        {
@@ -487,30 +516,40 @@ void benchcore(const char *host,const int port,const char *req)
        }
        return;
     }
-    s=Socket(host,port);                          
+  
+    // fail 是记录 webbench 请求socket的过程当中的错误次数的
+    
+    s=Socket(host,port);                    // 生成 socket 句柄
     if(s<0) { failed++;continue;} 
-    if(rlen!=write(s,req,rlen)) {failed++;close(s);continue;}
+    
+    if(rlen!=write(s,req,rlen)) {failed++;close(s);continue;}   // 把请求写入socket句柄
+    
     if(http10==0) 
 	    if(shutdown(s,1)) { failed++;close(s);continue;}
+      
     if(force==0) 
     {
             /* read all available data from socket */
 	    while(1)
 	    {
-              if(timerexpired) break; 
+        if(timerexpired) break;       //这个判断是 假如子进程已经执行了 alarm_handler 函数之后, timerexpired 为 1,那么就不要再重复执行下面的逻辑了
+        
 	      i=read(s,buf,1500);
-              /* fprintf(stderr,"%d\n",i); */
-	      if(i<0) 
-              { 
-                 failed++;
-                 close(s);
-                 goto nexttry;
-              }
-	       else
-		       if(i==0) break;
-		       else
-			       bytes+=i;
-	    }
+        /* fprintf(stderr,"%d\n",i); */
+	      if(i<0)        // 如果读取 socket 失败
+        { 
+          failed++;
+          close(s);
+          /**
+            这里假如读取不了 HTTP 请求返回的数据，就关闭 socket连接， 然后再继续生成socket，重新请求 HTTP 服务器, 直到读取到数据
+          **/
+          goto nexttry;       // 读取失败的话, 重复执行上面的逻辑
+        }
+	      else           // 如果 HTTP 不到任何数据
+		      if(i==0) break;
+		    else          //  如果 HTTP 正常请求到数据
+			    bytes+=i;
+	    }      // END WHILE
     }
     if(close(s)) {failed++;continue;}
     speed++;
